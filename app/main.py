@@ -1,7 +1,5 @@
 from datetime import datetime, timezone
-
 from fastapi import FastAPI
-
 app = FastAPI(
     title="AWS NGINX Platform",
     description="A cloud-hosted application behind an NGINX reverse proxy.",
