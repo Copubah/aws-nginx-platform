@@ -80,20 +80,6 @@ resource "aws_iam_role_policy_attachment" "ssm_core" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-resource "aws_iam_role_policy" "deployment_download" {
-  name = "${var.project_name}-deployment-download"
-  role = aws_iam_role.ec2_ssm.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["s3:GetObject"]
-      Resource = "arn:aws:s3:::${var.deployment_bucket}/releases/aws-nginx-platform.tar.gz"
-    }]
-  })
-}
-
 resource "aws_iam_instance_profile" "ec2" {
   name = "${var.project_name}-instance-profile"
   role = aws_iam_role.ec2_ssm.name
@@ -114,53 +100,10 @@ resource "aws_instance" "web" {
   user_data = <<-EOF
     #!/bin/bash
     set -euxo pipefail
-    exec > >(tee -a /var/log/aws-nginx-platform-bootstrap.log) 2>&1
 
     dnf update -y
-    dnf install -y docker curl tar gzip unzip
-
+    dnf install -y docker
     systemctl enable --now docker
-
-    # Install AWS CLI v2.
-    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" \
-      -o /tmp/awscliv2.zip
-    unzip -q /tmp/awscliv2.zip -d /tmp
-    /tmp/aws/install
-    rm -rf /tmp/aws /tmp/awscliv2.zip
-
-    # Install Docker Compose as a CLI plugin.
-    install -d /usr/local/lib/docker/cli-plugins
-    curl -fsSL \
-      "https://github.com/docker/compose/releases/download/v2.32.4/docker-compose-linux-x86_64" \
-      -o /usr/local/lib/docker/cli-plugins/docker-compose
-    chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose
-
-    # Download the application archive, retrying while AWS permissions propagate.
-    mkdir -p /opt/aws-nginx-platform
-    downloaded=false
-
-    for attempt in $(seq 1 12); do
-      if aws s3 cp \
-        "s3://${var.deployment_bucket}/releases/aws-nginx-platform.tar.gz" \
-        /tmp/aws-nginx-platform.tar.gz \
-        --region "${var.aws_region}"; then
-        downloaded=true
-        break
-      fi
-      sleep 10
-    done
-
-    if [ "$downloaded" != "true" ]; then
-      echo "ERROR: Could not download the application archive."
-      exit 1
-    fi
-
-    tar -xzf /tmp/aws-nginx-platform.tar.gz \
-      -C /opt/aws-nginx-platform
-
-    cd /opt/aws-nginx-platform
-    docker compose -f docker-compose.prod.yml up --build -d
-    docker compose -f docker-compose.prod.yml ps
   EOF
 
   user_data_replace_on_change = true
@@ -183,7 +126,6 @@ resource "aws_instance" "web" {
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.ssm_core,
-    aws_iam_role_policy.deployment_download
+    aws_iam_role_policy_attachment.ssm_core
   ]
 }
